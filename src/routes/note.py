@@ -1,31 +1,29 @@
 from flask import Blueprint, jsonify, request, session
 from src.models.note import Note, db
 from src.models.user import User
-from src.routes.user import login_required, get_current_user
+from src.routes.user import login_required, get_current_user, can_access_note, can_modify_note
 import uuid
 
 note_bp = Blueprint('note', __name__)
 
 @note_bp.route('/notes', methods=['GET'])
+@login_required
 def get_notes():
-    """Get all notes (user's own notes + shared notes if logged in, or all notes if not logged in)"""
+    """Get user's notes (own notes + shared notes)"""
     current_user = get_current_user()
     
-    if current_user:
-        # Get user's own notes and notes shared with them
-        own_notes = Note.query.filter_by(user_id=current_user.id).all()
-        shared_notes = current_user.shared_notes
-        
-        # Combine and deduplicate
-        all_notes = {note.id: note for note in own_notes + shared_notes}.values()
-        notes = sorted(all_notes, key=lambda x: x.updated_at, reverse=True)
-    else:
-        # For backward compatibility, show all notes if not logged in
-        notes = Note.query.order_by(Note.updated_at.desc()).all()
+    # Get user's own notes and notes shared with them
+    own_notes = Note.query.filter_by(user_id=current_user.id).all()
+    shared_notes = current_user.shared_notes
+    
+    # Combine and deduplicate
+    all_notes = {note.id: note for note in own_notes + shared_notes}.values()
+    notes = sorted(all_notes, key=lambda x: x.updated_at, reverse=True)
     
     return jsonify([note.to_dict() for note in notes])
 
 @note_bp.route('/notes', methods=['POST'])
+@login_required
 def create_note():
     """Create a new note"""
     try:
@@ -38,7 +36,7 @@ def create_note():
             title=data['title'], 
             content=data['content'],
             category=data.get('category', 'General'),
-            user_id=current_user.id if current_user else None
+            user_id=current_user.id
         )
         db.session.add(note)
         db.session.commit()
@@ -48,18 +46,29 @@ def create_note():
         return jsonify({'error': str(e)}), 500
 
 @note_bp.route('/notes/<int:note_id>', methods=['GET'])
+@login_required
 def get_note(note_id):
     """Get a specific note by ID"""
+    current_user = get_current_user()
     note = Note.query.get_or_404(note_id)
+    
+    if not can_access_note(current_user, note):
+        return jsonify({'error': 'Access denied'}), 403
+    
     return jsonify(note.to_dict())
 
 @note_bp.route('/notes/<int:note_id>', methods=['PUT'])
+@login_required
 def update_note(note_id):
     """Update a specific note"""
     try:
+        current_user = get_current_user()
         note = Note.query.get_or_404(note_id)
-        data = request.json
         
+        if not can_modify_note(current_user, note):
+            return jsonify({'error': 'Permission denied'}), 403
+        
+        data = request.json
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
@@ -73,10 +82,16 @@ def update_note(note_id):
         return jsonify({'error': str(e)}), 500
 
 @note_bp.route('/notes/<int:note_id>', methods=['DELETE'])
+@login_required
 def delete_note(note_id):
     """Delete a specific note"""
     try:
+        current_user = get_current_user()
         note = Note.query.get_or_404(note_id)
+        
+        if not can_modify_note(current_user, note):
+            return jsonify({'error': 'Permission denied'}), 403
+        
         db.session.delete(note)
         db.session.commit()
         return '', 204
@@ -85,16 +100,24 @@ def delete_note(note_id):
         return jsonify({'error': str(e)}), 500
 
 @note_bp.route('/notes/search', methods=['GET'])
+@login_required
 def search_notes():
-    """Search notes by title or content"""
+    """Search notes by title or content (user's accessible notes only)"""
     query = request.args.get('q', '')
     category = request.args.get('category', '')
     
     if not query and not category:
         return jsonify([])
     
-    # Start with base query
-    notes_query = Note.query
+    current_user = get_current_user()
+    
+    # Get user's own notes and notes shared with them
+    own_notes = Note.query.filter_by(user_id=current_user.id)
+    shared_note_ids = [note.id for note in current_user.shared_notes]
+    shared_notes = Note.query.filter(Note.id.in_(shared_note_ids)) if shared_note_ids else Note.query.filter(False)
+    
+    # Combine queries
+    notes_query = own_notes.union(shared_notes)
     
     # Add text search filter if provided
     if query:
@@ -110,32 +133,47 @@ def search_notes():
     return jsonify([note.to_dict() for note in notes])
 
 @note_bp.route('/notes/categories', methods=['GET'])
+@login_required
 def get_categories():
-    """Get all unique categories"""
+    """Get all unique categories from user's accessible notes"""
     try:
-        categories = db.session.query(Note.category).distinct().all()
-        category_list = [cat[0] for cat in categories if cat[0]]
+        current_user = get_current_user()
+        
+        # Get categories from user's own notes
+        own_categories = db.session.query(Note.category).filter_by(user_id=current_user.id).distinct()
+        
+        # Get categories from shared notes
+        shared_note_ids = [note.id for note in current_user.shared_notes]
+        shared_categories = db.session.query(Note.category).filter(Note.id.in_(shared_note_ids)).distinct() if shared_note_ids else db.session.query(Note.category).filter(False).distinct()
+        
+        # Combine and get unique categories
+        all_categories = set()
+        for cat in own_categories.all():
+            if cat[0]:
+                all_categories.add(cat[0])
+        for cat in shared_categories.all():
+            if cat[0]:
+                all_categories.add(cat[0])
+        
+        category_list = sorted(list(all_categories))
         return jsonify(category_list)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @note_bp.route('/notes/by-category/<category>', methods=['GET'])
+@login_required
 def get_notes_by_category(category):
-    """Get notes by category"""
+    """Get notes by category (user's accessible notes only)"""
     try:
         current_user = get_current_user()
         
-        if current_user:
-            # Get user's own notes and notes shared with them
-            own_notes = Note.query.filter_by(category=category, user_id=current_user.id).all()
-            shared_notes = [note for note in current_user.shared_notes if note.category == category]
-            
-            # Combine and deduplicate
-            all_notes = {note.id: note for note in own_notes + shared_notes}.values()
-            notes = sorted(all_notes, key=lambda x: x.updated_at, reverse=True)
-        else:
-            # For backward compatibility
-            notes = Note.query.filter_by(category=category).order_by(Note.updated_at.desc()).all()
+        # Get user's own notes and notes shared with them
+        own_notes = Note.query.filter_by(category=category, user_id=current_user.id).all()
+        shared_notes = [note for note in current_user.shared_notes if note.category == category]
+        
+        # Combine and deduplicate
+        all_notes = {note.id: note for note in own_notes + shared_notes}.values()
+        notes = sorted(all_notes, key=lambda x: x.updated_at, reverse=True)
             
         return jsonify([note.to_dict() for note in notes])
     except Exception as e:

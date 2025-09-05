@@ -450,6 +450,14 @@
                 this.init();
             }
 
+            // Helper method for authenticated fetch requests
+            async authFetch(url, options = {}) {
+                return fetch(url, {
+                    credentials: 'include',
+                    ...options
+                });
+            }
+
             async init() {
                 this.bindEvents();
                 await this.checkAuthStatus();
@@ -494,7 +502,7 @@
 
             async loadCategories() {
                 try {
-                    const response = await fetch('/api/notes/categories');
+                    const response = await this.authFetch('/api/notes/categories');
                     if (!response.ok) throw new Error('Failed to load categories');
                     
                     this.categories = await response.json();
@@ -539,7 +547,7 @@
             // Authentication methods
             async checkAuthStatus() {
                 try {
-                    const response = await fetch('/api/me');
+                    const response = await this.authFetch('/api/me');
                     if (response.ok) {
                         this.currentUser = await response.json();
                         this.showUserInfo();
@@ -573,7 +581,7 @@
                 }
 
                 try {
-                    const response = await fetch('/api/login', {
+                    const response = await this.authFetch('/api/login', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ username, password })
@@ -608,7 +616,7 @@
 
                 try {
                     const email = `${username}@example.com`; // Simple email generation
-                    const response = await fetch('/api/register', {
+                    const response = await this.authFetch('/api/register', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ username, email, password })
@@ -634,7 +642,7 @@
 
             async logout() {
                 try {
-                    await fetch('/api/logout', { method: 'POST' });
+                    await this.authFetch('/api/logout', { method: 'POST' });
                     this.currentUser = null;
                     this.showLoginForm();
                     this.showMessage('Logged out successfully!', 'success');
@@ -677,7 +685,7 @@
                 }
 
                 try {
-                    const response = await fetch(`/api/notes/${this.currentNote.id}/share`, {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}/share`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ usernames })
@@ -698,7 +706,7 @@
 
             async makePublic() {
                 try {
-                    const response = await fetch(`/api/notes/${this.currentNote.id}/public`, {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}/public`, {
                         method: 'POST'
                     });
 
@@ -720,7 +728,7 @@
 
             async makePrivate() {
                 try {
-                    const response = await fetch(`/api/notes/${this.currentNote.id}/unpublic`, {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}/unpublic`, {
                         method: 'POST'
                     });
 
@@ -740,7 +748,7 @@
                 this.showMessage('Loading notes...', 'loading');
                 
                 try {
-                    const response = await fetch('/api/notes');
+                    const response = await this.authFetch('/api/notes');
                     if (!response.ok) throw new Error('Failed to load notes');
                     
                     this.notes = await response.json();
@@ -856,14 +864,14 @@
                     let response;
                     if (this.currentNote.id) {
                         // Update existing note
-                        response = await fetch(`/api/notes/${this.currentNote.id}`, {
+                        response = await this.authFetch(`/api/notes/${this.currentNote.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(noteData)
                         });
                     } else {
                         // Create new note
-                        response = await fetch('/api/notes', {
+                        response = await this.authFetch('/api/notes', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(noteData)
@@ -905,7 +913,7 @@
                 if (!confirm('Are you sure you want to delete this note?')) return;
 
                 try {
-                    const response = await fetch(`/api/notes/${this.currentNote.id}`, {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}`, {
                         method: 'DELETE'
                     });
 

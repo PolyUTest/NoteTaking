@@ -153,6 +153,18 @@
             margin-top: 5px;
         }
 
+        .note-category {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-top: 5px;
+            margin-right: 5px;
+        }
+
         .editor-header {
             display: flex;
             justify-content: space-between;
@@ -332,7 +344,29 @@
 
         <div class="main-content">
             <div class="sidebar">
+                <div id="authSection">
+                    <div id="loginForm" style="margin-bottom: 15px;">
+                        <input type="text" class="form-input" id="authUsername" placeholder="Username" style="margin-bottom: 8px; padding: 8px 12px; font-size: 14px;">
+                        <input type="password" class="form-input" id="authPassword" placeholder="Password" style="margin-bottom: 8px; padding: 8px 12px; font-size: 14px;">
+                        <div style="display: flex; gap: 5px;">
+                            <button class="btn btn-save" id="loginBtn" style="flex: 1; padding: 8px; font-size: 14px;">Login</button>
+                            <button class="btn" id="registerBtn" style="flex: 1; padding: 8px; font-size: 14px; background: #6c757d; color: white;">Register</button>
+                        </div>
+                    </div>
+                    <div id="userInfo" style="display: none; margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 8px;">
+                        <div style="font-weight: 600; color: #333;" id="usernameDisplay"></div>
+                        <button class="btn" id="logoutBtn" style="padding: 6px 12px; font-size: 12px; background: #dc3545; color: white; margin-top: 5px;">Logout</button>
+                    </div>
+                </div>
+                
                 <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search notes...">
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <select class="form-input" id="categoryFilter" style="padding: 8px 12px; font-size: 14px;">
+                        <option value="">All Categories</option>
+                    </select>
+                </div>
+                
                 <button class="new-note-btn" id="newNoteBtn">✨ New Note</button>
                 
                 <div class="notes-list" id="notesList">
@@ -345,6 +379,7 @@
                     <h2 class="editor-title" id="editorTitle">Select a note to edit</h2>
                     <div class="editor-actions" id="editorActions" style="display: none;">
                         <button class="btn btn-save" id="saveBtn">💾 Save</button>
+                        <button class="btn" id="shareBtn" style="background: #17a2b8; color: white;">🔗 Share</button>
                         <button class="btn btn-delete" id="deleteBtn">🗑️ Delete</button>
                     </div>
                 </div>
@@ -355,6 +390,12 @@
                     <div class="form-group">
                         <label class="form-label" for="noteTitle">Title</label>
                         <input type="text" class="form-input" id="noteTitle" placeholder="Enter note title...">
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="noteCategory">Category</label>
+                        <input type="text" class="form-input" id="noteCategory" placeholder="Enter category (e.g., Work, Personal, Ideas)" list="categoryList">
+                        <datalist id="categoryList"></datalist>
                     </div>
 
                     <div class="form-group">
@@ -371,25 +412,77 @@
         </div>
     </div>
 
+    <!-- Sharing Modal -->
+    <div id="shareModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 15px; padding: 30px; width: 90%; max-width: 500px;">
+            <h3 style="margin-bottom: 20px; color: #333;">Share Note</h3>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600;">Share with users:</label>
+                <input type="text" id="shareUsernames" placeholder="Enter usernames separated by commas" style="width: 100%; padding: 10px; border: 2px solid #e1e5e9; border-radius: 8px; margin-bottom: 10px;">
+                <button id="shareWithUsersBtn" class="btn btn-save" style="margin-right: 10px;">Share</button>
+            </div>
+            
+            <div style="margin-bottom: 20px; border-top: 1px solid #eee; padding-top: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600;">Public sharing:</label>
+                <button id="makePublicBtn" class="btn" style="background: #28a745; color: white; margin-right: 10px;">Make Public</button>
+                <button id="makePrivateBtn" class="btn" style="background: #6c757d; color: white; margin-right: 10px;">Make Private</button>
+                <div id="publicLinkArea" style="margin-top: 10px; display: none;">
+                    <input type="text" id="publicLink" readonly style="width: 100%; padding: 8px; background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px;">
+                </div>
+            </div>
+            
+            <div style="text-align: right;">
+                <button id="closeShareModal" class="btn" style="background: #6c757d; color: white;">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         class NoteTaker {
             constructor() {
                 this.notes = [];
+                this.categories = [];
                 this.currentNote = null;
+                this.currentUser = null;
                 this.isLoading = false;
+                this.currentCategoryFilter = '';
                 this.init();
+            }
+
+            // Helper method for authenticated fetch requests
+            async authFetch(url, options = {}) {
+                return fetch(url, {
+                    credentials: 'include',
+                    ...options
+                });
             }
 
             async init() {
                 this.bindEvents();
+                await this.checkAuthStatus();
+                await this.loadCategories();
                 await this.loadNotes();
             }
 
             bindEvents() {
                 document.getElementById('newNoteBtn').addEventListener('click', () => this.createNewNote());
                 document.getElementById('saveBtn').addEventListener('click', () => this.saveNote());
+                document.getElementById('shareBtn').addEventListener('click', () => this.showShareModal());
                 document.getElementById('deleteBtn').addEventListener('click', () => this.deleteNote());
                 document.getElementById('searchBox').addEventListener('input', (e) => this.searchNotes(e.target.value));
+                document.getElementById('categoryFilter').addEventListener('change', (e) => this.filterByCategory(e.target.value));
+                
+                // Auth events
+                document.getElementById('loginBtn').addEventListener('click', () => this.login());
+                document.getElementById('registerBtn').addEventListener('click', () => this.register());
+                document.getElementById('logoutBtn').addEventListener('click', () => this.logout());
+                
+                // Sharing events
+                document.getElementById('closeShareModal').addEventListener('click', () => this.hideShareModal());
+                document.getElementById('shareWithUsersBtn').addEventListener('click', () => this.shareWithUsers());
+                document.getElementById('makePublicBtn').addEventListener('click', () => this.makePublic());
+                document.getElementById('makePrivateBtn').addEventListener('click', () => this.makePrivate());
                 
                 // Auto-save on content change (debounced)
                 let saveTimeout;
@@ -404,14 +497,258 @@
                 
                 document.getElementById('noteTitle').addEventListener('input', autoSave);
                 document.getElementById('noteContent').addEventListener('input', autoSave);
+                document.getElementById('noteCategory').addEventListener('input', autoSave);
             }
 
+            async loadCategories() {
+                try {
+                    const response = await this.authFetch('/api/notes/categories');
+                    if (!response.ok) throw new Error('Failed to load categories');
+                    
+                    this.categories = await response.json();
+                    this.renderCategoryFilter();
+                    this.renderCategoryDatalist();
+                } catch (error) {
+                    console.error('Error loading categories:', error);
+                }
+            }
+
+            renderCategoryFilter() {
+                const filter = document.getElementById('categoryFilter');
+                filter.innerHTML = '<option value="">All Categories</option>';
+                
+                this.categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category;
+                    option.textContent = category;
+                    if (category === this.currentCategoryFilter) {
+                        option.selected = true;
+                    }
+                    filter.appendChild(option);
+                });
+            }
+
+            renderCategoryDatalist() {
+                const datalist = document.getElementById('categoryList');
+                datalist.innerHTML = '';
+                
+                this.categories.forEach(category => {
+                    const option = document.createElement('option');
+                    option.value = category;
+                    datalist.appendChild(option);
+                });
+            }
+
+            filterByCategory(category) {
+                this.currentCategoryFilter = category;
+                this.renderNotesList();
+            }
+
+            // Authentication methods
+            async checkAuthStatus() {
+                try {
+                    const response = await this.authFetch('/api/me');
+                    if (response.ok) {
+                        this.currentUser = await response.json();
+                        this.showUserInfo();
+                    } else {
+                        this.showLoginForm();
+                    }
+                } catch (error) {
+                    this.showLoginForm();
+                }
+            }
+
+            showUserInfo() {
+                document.getElementById('loginForm').style.display = 'none';
+                document.getElementById('userInfo').style.display = 'block';
+                document.getElementById('usernameDisplay').textContent = `Welcome, ${this.currentUser.username}!`;
+            }
+
+            showLoginForm() {
+                document.getElementById('loginForm').style.display = 'block';
+                document.getElementById('userInfo').style.display = 'none';
+                this.currentUser = null;
+            }
+
+            async login() {
+                const username = document.getElementById('authUsername').value.trim();
+                const password = document.getElementById('authPassword').value.trim();
+                
+                if (!username || !password) {
+                    this.showMessage('Please enter username and password', 'error');
+                    return;
+                }
+
+                try {
+                    const response = await this.authFetch('/api/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password })
+                    });
+
+                    if (response.ok) {
+                        this.currentUser = await response.json();
+                        this.showUserInfo();
+                        this.showMessage('Logged in successfully!', 'success');
+                        await this.loadNotes(); // Reload notes for the user
+                        
+                        // Clear form
+                        document.getElementById('authUsername').value = '';
+                        document.getElementById('authPassword').value = '';
+                    } else {
+                        const error = await response.json();
+                        this.showMessage(error.error || 'Login failed', 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Login failed: ' + error.message, 'error');
+                }
+            }
+
+            async register() {
+                const username = document.getElementById('authUsername').value.trim();
+                const password = document.getElementById('authPassword').value.trim();
+                
+                if (!username || !password) {
+                    this.showMessage('Please enter username and password', 'error');
+                    return;
+                }
+
+                try {
+                    const email = `${username}@example.com`; // Simple email generation
+                    const response = await this.authFetch('/api/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, email, password })
+                    });
+
+                    if (response.ok) {
+                        this.currentUser = await response.json();
+                        this.showUserInfo();
+                        this.showMessage('Registered and logged in successfully!', 'success');
+                        await this.loadNotes(); // Reload notes for the user
+                        
+                        // Clear form
+                        document.getElementById('authUsername').value = '';
+                        document.getElementById('authPassword').value = '';
+                    } else {
+                        const error = await response.json();
+                        this.showMessage(error.error || 'Registration failed', 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Registration failed: ' + error.message, 'error');
+                }
+            }
+
+            async logout() {
+                try {
+                    await this.authFetch('/api/logout', { method: 'POST' });
+                    this.currentUser = null;
+                    this.showLoginForm();
+                    this.showMessage('Logged out successfully!', 'success');
+                    await this.loadNotes(); // Reload notes (will show all notes)
+                } catch (error) {
+                    this.showMessage('Logout failed: ' + error.message, 'error');
+                }
+            }
+
+            // Sharing methods
+            showShareModal() {
+                if (!this.currentUser) {
+                    this.showMessage('Please login to share notes', 'error');
+                    return;
+                }
+                
+                if (!this.currentNote || !this.currentNote.id) {
+                    this.showMessage('Please save the note first', 'error');
+                    return;
+                }
+                
+                document.getElementById('shareModal').style.display = 'block';
+            }
+
+            hideShareModal() {
+                document.getElementById('shareModal').style.display = 'none';
+                document.getElementById('shareUsernames').value = '';
+                document.getElementById('publicLinkArea').style.display = 'none';
+            }
+
+            async shareWithUsers() {
+                const usernames = document.getElementById('shareUsernames').value
+                    .split(',')
+                    .map(u => u.trim())
+                    .filter(u => u.length > 0);
+
+                if (usernames.length === 0) {
+                    this.showMessage('Please enter usernames to share with', 'error');
+                    return;
+                }
+
+                try {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}/share`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ usernames })
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.showMessage(result.message, 'success');
+                        document.getElementById('shareUsernames').value = '';
+                    } else {
+                        const error = await response.json();
+                        this.showMessage(error.error || 'Sharing failed', 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Sharing failed: ' + error.message, 'error');
+                }
+            }
+
+            async makePublic() {
+                try {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}/public`, {
+                        method: 'POST'
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        this.showMessage('Note is now publicly accessible', 'success');
+                        
+                        const publicUrl = `${window.location.origin}/api${result.public_url}`;
+                        document.getElementById('publicLink').value = publicUrl;
+                        document.getElementById('publicLinkArea').style.display = 'block';
+                    } else {
+                        const error = await response.json();
+                        this.showMessage(error.error || 'Failed to make note public', 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Failed to make note public: ' + error.message, 'error');
+                }
+            }
+
+            async makePrivate() {
+                try {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}/unpublic`, {
+                        method: 'POST'
+                    });
+
+                    if (response.ok) {
+                        this.showMessage('Note is now private', 'success');
+                        document.getElementById('publicLinkArea').style.display = 'none';
+                    } else {
+                        const error = await response.json();
+                        this.showMessage('Failed to make note private', 'error');
+                    }
+                } catch (error) {
+                    this.showMessage('Failed to make note private: ' + error.message, 'error');
+                }
+            }
             async loadNotes() {
                 this.isLoading = true;
                 this.showMessage('Loading notes...', 'loading');
                 
                 try {
-                    const response = await fetch('/api/notes');
+                    const response = await this.authFetch('/api/notes');
                     if (!response.ok) throw new Error('Failed to load notes');
                     
                     this.notes = await response.json();
@@ -427,16 +764,26 @@
             renderNotesList() {
                 const notesList = document.getElementById('notesList');
                 
-                if (this.notes.length === 0) {
-                    notesList.innerHTML = '<div class="empty-state"><p>No notes yet. Create your first note!</p></div>';
+                // Filter notes by category if a filter is set
+                let filteredNotes = this.notes;
+                if (this.currentCategoryFilter) {
+                    filteredNotes = this.notes.filter(note => note.category === this.currentCategoryFilter);
+                }
+                
+                if (filteredNotes.length === 0) {
+                    const emptyMessage = this.currentCategoryFilter 
+                        ? `No notes found in "${this.currentCategoryFilter}" category.`
+                        : 'No notes yet. Create your first note!';
+                    notesList.innerHTML = `<div class="empty-state"><p>${emptyMessage}</p></div>`;
                     return;
                 }
 
-                notesList.innerHTML = this.notes.map(note => `
+                notesList.innerHTML = filteredNotes.map(note => `
                     <div class="note-item ${this.currentNote && this.currentNote.id === note.id ? 'active' : ''}" 
                          data-note-id="${note.id}" onclick="noteTaker.selectNote(${note.id})">
                         <div class="note-title">${this.escapeHtml(note.title || 'Untitled')}</div>
                         <div class="note-preview">${this.escapeHtml(note.content || 'No content')}</div>
+                        <div class="note-category">${this.escapeHtml(note.category || 'General')}</div>
                         <div class="note-date">${this.formatDate(note.updated_at)}</div>
                     </div>
                 `).join('');
@@ -452,6 +799,7 @@
                 
                 document.getElementById('noteTitle').value = note.title || '';
                 document.getElementById('noteContent').value = note.content || '';
+                document.getElementById('noteCategory').value = note.category || 'General';
                 document.getElementById('editorTitle').textContent = note.title || 'Untitled Note';
             }
 
@@ -460,6 +808,7 @@
                     id: null,
                     title: '',
                     content: '',
+                    category: 'General',
                     created_at: new Date().toISOString(),
                     updated_at: new Date().toISOString()
                 };
@@ -467,6 +816,7 @@
                 this.showEditor();
                 document.getElementById('noteTitle').value = '';
                 document.getElementById('noteContent').value = '';
+                document.getElementById('noteCategory').value = 'General';
                 document.getElementById('editorTitle').textContent = 'New Note';
                 document.getElementById('noteTitle').focus();
                 
@@ -495,6 +845,7 @@
 
                 const title = document.getElementById('noteTitle').value.trim();
                 const content = document.getElementById('noteContent').value.trim();
+                const category = document.getElementById('noteCategory').value.trim() || 'General';
 
                 if (!title && !content) {
                     if (!isAutoSave) {
@@ -506,20 +857,21 @@
                 try {
                     const noteData = {
                         title: title || 'Untitled',
-                        content: content
+                        content: content,
+                        category: category
                     };
 
                     let response;
                     if (this.currentNote.id) {
                         // Update existing note
-                        response = await fetch(`/api/notes/${this.currentNote.id}`, {
+                        response = await this.authFetch(`/api/notes/${this.currentNote.id}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(noteData)
                         });
                     } else {
                         // Create new note
-                        response = await fetch('/api/notes', {
+                        response = await this.authFetch('/api/notes', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(noteData)
@@ -539,6 +891,11 @@
                         this.notes.unshift(savedNote);
                     }
                     
+                    // Reload categories if a new one was added
+                    if (!this.categories.includes(category)) {
+                        await this.loadCategories();
+                    }
+                    
                     this.renderNotesList();
                     document.getElementById('editorTitle').textContent = savedNote.title;
                     
@@ -556,7 +913,7 @@
                 if (!confirm('Are you sure you want to delete this note?')) return;
 
                 try {
-                    const response = await fetch(`/api/notes/${this.currentNote.id}`, {
+                    const response = await this.authFetch(`/api/notes/${this.currentNote.id}`, {
                         method: 'DELETE'
                     });
 
@@ -573,15 +930,27 @@
             }
 
             searchNotes(query) {
-                const filteredNotes = query.trim() === '' ? this.notes : 
-                    this.notes.filter(note => 
+                let filteredNotes = this.notes;
+                
+                // Apply category filter first
+                if (this.currentCategoryFilter) {
+                    filteredNotes = filteredNotes.filter(note => note.category === this.currentCategoryFilter);
+                }
+                
+                // Apply search filter
+                if (query.trim() !== '') {
+                    filteredNotes = filteredNotes.filter(note => 
                         (note.title && note.title.toLowerCase().includes(query.toLowerCase())) ||
                         (note.content && note.content.toLowerCase().includes(query.toLowerCase()))
                     );
+                }
 
                 const notesList = document.getElementById('notesList');
                 if (filteredNotes.length === 0) {
-                    notesList.innerHTML = '<div class="empty-state"><p>No notes found matching your search.</p></div>';
+                    const emptyMessage = query.trim() 
+                        ? 'No notes found matching your search.'
+                        : (this.currentCategoryFilter ? `No notes found in "${this.currentCategoryFilter}" category.` : 'No notes found.');
+                    notesList.innerHTML = `<div class="empty-state"><p>${emptyMessage}</p></div>`;
                     return;
                 }
 
@@ -590,6 +959,7 @@
                          data-note-id="${note.id}" onclick="noteTaker.selectNote(${note.id})">
                         <div class="note-title">${this.escapeHtml(note.title || 'Untitled')}</div>
                         <div class="note-preview">${this.escapeHtml(note.content || 'No content')}</div>
+                        <div class="note-category">${this.escapeHtml(note.category || 'General')}</div>
                         <div class="note-date">${this.formatDate(note.updated_at)}</div>
                     </div>
                 `).join('');

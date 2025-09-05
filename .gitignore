@@ -95,3 +95,4 @@ coverage/
 *.cover
 *.pid
 *.seed
+*.txt
